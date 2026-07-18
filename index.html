@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Webcam ➔ VRM 驅動測試</title>
+    <title>Webcam ➔ VRM 多功能驅動測試</title>
     <style>
         body {
             margin: 0;
@@ -100,12 +100,15 @@
 <body>
 
     <div id="ui-container">
-        <h1>Webcam ➔ VRM 驅動測試</h1>
+        <h1>Webcam ➔ VRM 多功能驅動測試</h1>
         <div id="status" class="status-text error">
             系統狀態：等待上傳模型。請點擊下方按鈕選擇您的 .vrm 檔案。
         </div>
         <div class="hint">
-            💡 提示：載入完成後請舉起手在視訊畫面內上下擺動，觀察模型手臂是否連動。
+            👋 <b>多功能手勢控制說明：</b><br>
+            1. <b>手臂擺動</b>：手上下移動控制手臂。<br>
+            2. <b>模型旋轉</b>：手在畫面中<b>左右移動</b>，模型會跟著轉向。<br>
+            3. <b>放大縮小</b>：手掌<b>靠近鏡頭</b>模型變大，<b>遠離鏡頭</b>模型變小。
         </div>
         <div class="interactive">
             <label for="vrm-upload" class="upload-btn">選擇並上傳 VRM 模型</label>
@@ -177,7 +180,7 @@
                     currentVrm = vrm;
                     scene.add(vrm.scene);
 
-                    // 轉向正面
+                    // 初始面向正面
                     vrm.scene.rotation.y = Math.PI; 
 
                     statusElement.className = "status-text success";
@@ -238,31 +241,60 @@
                 });
         }
 
-        // --- 最新穩定版相容骨骼操控邏輯 ---
+        // --- 多功能複合手勢處理邏輯 ---
         function onHandResults(results) {
             if (!currentVrm || !results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
                 return;
             }
 
             const landmarks = results.multiHandLandmarks[0];
-            const wristY = landmarks[0].y; 
+            
+            // 取得核心關節坐標
+            const wrist = landmarks[0];       // 手腕
+            const indexFinger = landmarks[5]; // 食指根部
 
-            // 調整計算公式，手抬高時角度增大
-            const targetRotationZ = (0.5 - wristY) * 2.5; 
-
+            // ==========================================
+            // 功能 1：手上下移動 ➔ 控制手臂旋轉 (原本功能)
+            // ==========================================
+            const targetRotationZ = (0.5 - wrist.y) * 2.5; 
             const humanoid = currentVrm.humanoid;
             if (!humanoid) return;
 
-            // 核心修正：利用 getNormalizedBoneNode 直接取得標準化可旋轉節點 (Three-VRM 套件新規範)
             const rightArm = humanoid.getNormalizedBoneNode('rightUpperArm');
             if (rightArm) {
                 rightArm.rotation.z = THREE.MathUtils.lerp(rightArm.rotation.z, -targetRotationZ, 0.25);
             }
-            
             const leftArm = humanoid.getNormalizedBoneNode('leftUpperArm');
             if (leftArm) {
                 leftArm.rotation.z = THREE.MathUtils.lerp(leftArm.rotation.z, targetRotationZ, 0.25);
             }
+
+            // ==========================================
+            // 功能 2：手左右移動 ➔ 控制模型水平旋轉 (新加入)
+            // ==========================================
+            // wrist.x 範圍為 0~1 (左到右)，減去 0.5 得到偏移量
+            // 因為鏡像關係，手往右（x變大），我們要讓模型做對應旋轉
+            const targetModelRotationY = Math.PI + (wrist.x - 0.5) * 2.0; 
+            currentVrm.scene.rotation.y = THREE.MathUtils.lerp(currentVrm.scene.rotation.y, targetModelRotationY, 0.1);
+
+            // ==========================================
+            // 功能 3：手掌靠近/遠離鏡頭 ➔ 控制模型縮放 (新加入)
+            // ==========================================
+            // 利用手腕(0)與食指根部(5)在二維畫面上的歐幾里得距離，當作手掌大小依據
+            const dx = indexFinger.x - wrist.x;
+            const dy = indexFinger.y - wrist.y;
+            const handSize = Math.sqrt(dx * dx + dy * dy); // 手掌在畫面中的像素佔比 (大約 0.05 ~ 0.35 之間)
+
+            // 將手掌大小映射至模型縮放倍率 (基礎值 1.0，範圍大約在 0.6 ~ 1.8 之間)
+            // 可依據現場距離微調 5.0 這個乘數
+            const targetScale = THREE.MathUtils.clamp(handSize * 6.0, 0.5, 2.0);
+            
+            // 同步對 X, Y, Z 三軸進行平滑縮放
+            currentVrm.scene.scale.set(
+                THREE.MathUtils.lerp(currentVrm.scene.scale.x, targetScale, 0.1),
+                THREE.MathUtils.lerp(currentVrm.scene.scale.y, targetScale, 0.1),
+                THREE.MathUtils.lerp(currentVrm.scene.scale.z, targetScale, 0.1)
+            );
         }
 
         function animate() {
