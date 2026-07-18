@@ -60,7 +60,6 @@
         .upload-btn:hover {
             background: #005ecf;
         }
-        /* 攝影機預覽畫面（左下角） */
         #webcam-container {
             position: absolute;
             bottom: 20px;
@@ -71,14 +70,13 @@
             border-radius: 10px;
             overflow: hidden;
             z-index: 10;
-            transform: scaleX(-1); /* 鏡像畫面方便使用者對照 */
+            transform: scaleX(-1); 
         }
         #webcam {
             width: 100%;
             height: 100%;
             object-fit: cover;
         }
-        /* 3D 渲染畫布 */
         #canvas3d {
             width: 100vw;
             height: 100vh;
@@ -86,7 +84,6 @@
         }
     </style>
 
-    <!-- 匯入 Three.js 與必要套件的 CDN (使用 ES Modules 映射) -->
     <script type="importmap">
         {
             "imports": {
@@ -97,7 +94,6 @@
         }
     </script>
     
-    <!-- 匯入 MediaPipe Hands 用于手勢辨識 -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
 </head>
@@ -106,10 +102,10 @@
     <div id="ui-container">
         <h1>Webcam ➔ VRM 驅動測試</h1>
         <div id="status" class="status-text error">
-            系統狀態：等待上傳模型。請點擊下方按鈕選擇您的 .vrm 檔案以繞過跨網域阻擋。
+            系統狀態：等待上傳模型。請點擊下方按鈕選擇您的 .vrm 檔案。
         </div>
         <div class="hint">
-            💡 提示：載入完成後請允許相機權限，並請退後一點，確保您的**手部**能完整出現在視訊方框內。
+            💡 提示：載入完成後請舉起手在視訊畫面內上下擺動，觀察模型手臂是否連動。
         </div>
         <div class="interactive">
             <label for="vrm-upload" class="upload-btn">選擇並上傳 VRM 模型</label>
@@ -133,7 +129,6 @@
         const statusElement = document.getElementById('status');
         const fileInput = document.getElementById('vrm-upload');
 
-        // --- 1. 初始化 3D 場景 ---
         function init3D() {
             const canvas = document.getElementById('canvas3d');
             renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
@@ -144,22 +139,20 @@
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x0a0a0a);
 
-            // 調整相機位置，更靠近角色正面上半身
             camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.1, 20.0);
-            camera.position.set(0.0, 1.3, 1.5); 
+            camera.position.set(0.0, 1.3, 1.6); 
 
-            const light = new THREE.DirectionalLight(0xffffff, 1.2);
+            const light = new THREE.DirectionalLight(0xffffff, 1.5);
             light.position.set(0.0, 1.0, 1.0).normalize();
             scene.add(light);
 
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
             scene.add(ambientLight);
 
             clock = new THREE.Clock();
             animate();
         }
 
-        // --- 2. 處理使用者本地上傳 VRM ---
         const loader = new GLTFLoader();
         loader.register((parser) => new VRMLoaderPlugin(parser));
 
@@ -172,16 +165,6 @@
 
             if (currentVrm) {
                 scene.remove(currentVrm.scene);
-                currentVrm.scene.traverse((object) => {
-                    if (object.geometry) object.geometry.dispose();
-                    if (object.material) {
-                        if (Array.isArray(object.material)) {
-                            object.material.forEach((material) => material.dispose());
-                        } else {
-                            object.material.dispose();
-                        }
-                    }
-                });
                 currentVrm = null;
             }
 
@@ -194,15 +177,13 @@
                     currentVrm = vrm;
                     scene.add(vrm.scene);
 
-                    // 關鍵修正：將角度設為 0，讓模型正面朝向螢幕前方的使用者
-                    vrm.scene.rotation.y = 0; 
+                    // 強制轉向 180 度（Math.PI），確保正面向著螢幕
+                    vrm.scene.rotation.y = Math.PI; 
 
                     statusElement.className = "status-text success";
                     statusElement.innerText = "系統狀態：模型載入成功！正在啟動視訊鏡頭偵測...";
                     
                     URL.revokeObjectURL(blobUrl);
-                    
-                    // 啟動視訊與追蹤
                     initWebcamAndTracking();
                 },
                 (progress) => {
@@ -214,15 +195,13 @@
                 (error) => {
                     console.error(error);
                     statusElement.className = "status-text error";
-                    statusElement.innerText = "系統狀態：模型解析失敗，請確認檔案是否為標準 VRM 格式。";
+                    statusElement.innerText = "系統狀態：模型解析失敗。";
                     URL.revokeObjectURL(blobUrl);
                 }
             );
         });
 
-        // --- 3. 初始化視訊與 MediaPipe 手勢偵測 ---
         function initWebcamAndTracking() {
-            // 避免重複初始化
             if (window.trackerInitialized) return;
             window.trackerInitialized = true;
 
@@ -255,49 +234,51 @@
                 .catch((err) => {
                     console.error(err);
                     statusElement.className = "status-text error";
-                    statusElement.innerText = "系統狀態：無法存取視訊鏡頭，請確認瀏覽器權限是否開啟。";
+                    statusElement.innerText = "系統狀態：視訊鏡頭啟動失敗。";
                 });
         }
 
-        // --- 4. 核心修正：手勢結果連動骨骼 ---
+        // --- 萬用相容手勢連動處理 ---
         function onHandResults(results) {
             if (!currentVrm || !results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
                 return;
             }
 
-            // 取得畫面上偵測到的第一隻手（不分左右手，只要抓到就驅動）
             const landmarks = results.multiHandLandmarks[0];
-            
-            // 取得手腕（WRIST，節點 0）的 Y 軸位置 (MediaPipe 頂部為 0，底部為 1)
             const wristY = landmarks[0].y; 
 
-            // 將 Y 軸數值轉換為手臂上下旋轉的角度 (弧度制)
-            // 當手舉高 (wristY 接近 0) 時，算出的角度會變大；手放下時變小
-            const targetRotationZ = (0.5 - wristY) * 2.5; 
+            // 計算出更靈敏的角度變化
+            const targetRotationZ = (0.5 - wristY) * 3.0; 
 
-            // 同步驅動右手臂與左手臂骨骼
-            const rightUpperArm = currentVrm.humanoid.getRawBoneNode('rightUpperArm');
-            if (rightUpperArm) {
-                // 平滑插值 (Lerp)，數值 0.25 可使擺動看起來較為柔和順暢
-                rightUpperArm.rotation.z = THREE.MathUtils.lerp(rightUpperArm.rotation.z, targetRotationZ, 0.25);
+            // 同時兼容新舊版 VRM 骨骼結構的抓取方式
+            const humanoid = currentVrm.humanoid;
+            
+            // 抓取右手臂（相容寫法）
+            const rightArm = humanoid.getRawBoneNode('rightUpperArm') || 
+                             (humanoid.getBoneNode && humanoid.getBoneNode('rightUpperArm')) ||
+                             (currentVrm.vrm1 ? currentVrm.humanoid.getNormalizedBoneNode('rightUpperArm') : null);
+
+            if (rightArm) {
+                // 當模型轉正 180 度後，右手 z 軸正負號需做對應調整
+                rightArm.rotation.z = THREE.MathUtils.lerp(rightArm.rotation.z, -targetRotationZ, 0.25);
             }
             
-            const leftUpperArm = currentVrm.humanoid.getRawBoneNode('leftUpperArm');
-            if (leftUpperArm) {
-                // 左臂旋轉方向與右臂相反，故加上負號
-                leftUpperArm.rotation.z = THREE.MathUtils.lerp(leftUpperArm.rotation.z, -targetRotationZ, 0.25);
+            // 抓取左手臂（相容寫法）
+            const leftArm = humanoid.getRawBoneNode('leftUpperArm') || 
+                            (humanoid.getBoneNode && humanoid.getBoneNode('leftUpperArm')) ||
+                            (currentVrm.vrm1 ? currentVrm.humanoid.getNormalizedBoneNode('leftUpperArm') : null);
+
+            if (leftArm) {
+                leftArm.rotation.z = THREE.MathUtils.lerp(leftArm.rotation.z, targetRotationZ, 0.25);
             }
         }
 
-        // --- 5. 動畫渲染迴圈 ---
         function animate() {
             requestAnimationFrame(animate);
-
             const delta = clock.getDelta();
             if (currentVrm) {
                 currentVrm.update(delta);
             }
-
             if (renderer && scene && camera) {
                 renderer.render(scene, camera);
             }
