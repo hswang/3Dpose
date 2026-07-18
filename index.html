@@ -177,7 +177,7 @@
                     currentVrm = vrm;
                     scene.add(vrm.scene);
 
-                    // 強制轉向 180 度（Math.PI），確保正面向著螢幕
+                    // 轉向正面
                     vrm.scene.rotation.y = Math.PI; 
 
                     statusElement.className = "status-text success";
@@ -238,7 +238,7 @@
                 });
         }
 
-        // --- 萬用相容手勢連動處理 ---
+        // --- 最新穩定版相容骨骼操控邏輯 ---
         function onHandResults(results) {
             if (!currentVrm || !results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
                 return;
@@ -247,27 +247,19 @@
             const landmarks = results.multiHandLandmarks[0];
             const wristY = landmarks[0].y; 
 
-            // 計算出更靈敏的角度變化
-            const targetRotationZ = (0.5 - wristY) * 3.0; 
+            // 調整計算公式，手抬高時角度增大
+            const targetRotationZ = (0.5 - wristY) * 2.5; 
 
-            // 同時兼容新舊版 VRM 骨骼結構的抓取方式
             const humanoid = currentVrm.humanoid;
-            
-            // 抓取右手臂（相容寫法）
-            const rightArm = humanoid.getRawBoneNode('rightUpperArm') || 
-                             (humanoid.getBoneNode && humanoid.getBoneNode('rightUpperArm')) ||
-                             (currentVrm.vrm1 ? currentVrm.humanoid.getNormalizedBoneNode('rightUpperArm') : null);
+            if (!humanoid) return;
 
+            // 核心修正：利用 getNormalizedBoneNode 直接取得標準化可旋轉節點 (Three-VRM 套件新規範)
+            const rightArm = humanoid.getNormalizedBoneNode('rightUpperArm');
             if (rightArm) {
-                // 當模型轉正 180 度後，右手 z 軸正負號需做對應調整
                 rightArm.rotation.z = THREE.MathUtils.lerp(rightArm.rotation.z, -targetRotationZ, 0.25);
             }
             
-            // 抓取左手臂（相容寫法）
-            const leftArm = humanoid.getRawBoneNode('leftUpperArm') || 
-                            (humanoid.getBoneNode && humanoid.getBoneNode('leftUpperArm')) ||
-                            (currentVrm.vrm1 ? currentVrm.humanoid.getNormalizedBoneNode('leftUpperArm') : null);
-
+            const leftArm = humanoid.getNormalizedBoneNode('leftUpperArm');
             if (leftArm) {
                 leftArm.rotation.z = THREE.MathUtils.lerp(leftArm.rotation.z, targetRotationZ, 0.25);
             }
