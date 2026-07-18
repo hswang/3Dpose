@@ -2,186 +2,316 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>Webcam 控制 VRM 模型系統</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Webcam ➔ VRM 驅動測試</title>
     <style>
-        body { margin: 0; padding: 0; overflow: hidden; background-color: #1a1a1a; font-family: sans-serif; }
-        #canvas3d { width: 100vw; height: 100vh; display: block; }
-        #webcam { display: none; }
-        #preview-container {
-            position: absolute; left: 20px; bottom: 20px;
-            width: 200px; height: 150px; background: #000;
-            border: 2px solid #fff; border-radius: 8px; overflow: hidden;
-            transform: scaleX(-1);
+        body {
+            margin: 0;
+            background-color: #000;
+            color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            overflow: hidden;
         }
-        #output_canvas { width: 100%; height: 100%; }
-        #info {
-            position: absolute; top: 20px; left: 20px;
-            color: #fff; background: rgba(0,0,0,0.8);
-            padding: 15px; border-radius: 8px; pointer-events: none;
-            max-width: 400px; line-height: 1.5;
+        #ui-container {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 10;
+            max-width: 500px;
+            pointer-events: none;
+        }
+        h1 {
+            font-size: 28px;
+            margin: 0 0 15px 0;
+        }
+        .status-text {
+            font-size: 16px;
+            line-height: 1.5;
+            margin-bottom: 15px;
+        }
+        .error {
+            color: #ffcc00;
+        }
+        .success {
+            color: #00ff88;
+        }
+        .hint {
+            font-size: 15px;
+            color: #ddd;
+            line-height: 1.4;
+        }
+        /* 讓按鈕與上傳元件可以被點擊 */
+        .interactive {
+            pointer-events: auto;
+            margin-top: 15px;
+        }
+        #vrm-upload {
+            display: none;
+        }
+        .upload-btn {
+            display: inline-block;
+            background: #0076ff;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background 0.2s;
+        }
+        .upload-btn:hover {
+            background: #005ecf;
+        }
+        /* 攝影機預覽畫面（左下角） */
+        #webcam-container {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            width: 240px;
+            height: 180px;
+            border: 2px solid #fff;
+            border-radius: 10px;
+            overflow: hidden;
+            z-index: 10;
+            transform: scaleX(-1); /* 鏡像畫面方便使用者對照 */
+        }
+        #webcam {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        /* 3D 渲染畫布 */
+        #canvas3d {
+            width: 100vw;
+            height: 100vh;
+            display: block;
         }
     </style>
 
-    <!-- 修正：引入相容性最好的 Three.js 舊版與配套載入器 -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
-    <script src="https://unpkg.com/@pixiv/three-vrm@0.6.7/lib/three-vrm.js"></script>
-
-    <!-- MediaPipe 動作偵測 -->
+    <!-- 匯入 Three.js 與必要套件的 CDN (使用 ES Modules 映射) -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.154.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.154.0/examples/jsm/",
+                "@pixiv/three-vrm": "https://unpkg.com/@pixiv/three-vrm@2.1.0/lib/three-vrm.module.js"
+            }
+        }
+    </script>
+    
+    <!-- 匯入 MediaPipe Hands 用於手勢辨識 -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
 </head>
 <body>
 
-    <div id="info">
-        <h2>Webcam ➔ VRM 驅動測試</h2>
-        <p>系統狀態：<span id="status" style="color: #ffc107;">正在初始化環境...</span></p>
-        <p>💡 提示：載入完成後請點擊允許相機權限，並向攝影機展示你的**右手**上下擺動！</p>
+    <div id="ui-container">
+        <h1>Webcam ➔ VRM 驅動測試</h1>
+        <div id="status" class="status-text error">
+            系統狀態：等待上傳模型。請點擊下方按鈕選擇您的 .vrm 檔案以繞過跨網域阻擋。
+        </div>
+        <div class="hint">
+            💡 提示：載入完成後請允許相機權限，並向攝影機展示你的 **右手** 上下擺動！
+        </div>
+        <div class="interactive">
+            <label for="vrm-upload" class="upload-btn">選擇並上傳 VRM 模型</label>
+            <input type="file" id="vrm-upload" accept=".vrm">
+        </div>
+    </div>
+
+    <div id="webcam-container">
+        <video id="webcam" autoplay playsinline></video>
     </div>
 
     <canvas id="canvas3d"></canvas>
 
-    <div id="preview-container">
-        <video id="webcam" autoplay playsinline></video>
-        <canvas id="output_canvas" width="200" height="150"></canvas>
-    </div>
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { VRMLoaderPlugin, VRMExpressionPresetName } from '@pixiv/three-vrm';
 
-    <script>
-        const statusEl = document.getElementById('status');
-        let currentVrm = null;
+        let scene, camera, renderer, currentVrm, clock;
+        const videoElement = document.getElementById('webcam');
+        const statusElement = document.getElementById('status');
+        const fileInput = document.getElementById('vrm-upload');
 
-        // 1. 初始化 3D 場景
-        const canvas3d = document.getElementById('canvas3d');
-        const scene = new THREE.Scene();
-        
-        const camera3d = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.1, 20.0);
-        camera3d.position.set(0.0, 1.4, 1.4);
+        // --- 1. 初始化 3D 場景 ---
+        function init3D() {
+            const canvas = document.getElementById('canvas3d');
+            renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.outputColorSpace = THREE.SRGBColorSpace;
 
-        const renderer = new THREE.WebGLRenderer({ canvas: canvas3d, antialias: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(window.devicePixelRatio);
-        renderer.outputEncoding = THREE.sRGBEncoding;
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0a0a0a);
 
-        const controls = new THREE.OrbitControls(camera3d, renderer.domElement);
-        controls.target.set(0.0, 1.3, 0.0);
-        controls.update();
+            camera = new THREE.PerspectiveCamera(30, window.innerWidth / window.innerHeight, 0.1, 20.0);
+            camera.position.set(0.0, 1.4, 1.4); // 對準一般角色的面部與上半身
 
-        const light = new THREE.DirectionalLight(0xffffff, 1.0);
-        light.position.set(1.0, 1.0, 1.0).normalize();
-        scene.add(light);
-        scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+            const light = new THREE.DirectionalLight(0xffffff, 1.0);
+            light.position.set(1.0, 1.0, 1.0).normalize();
+            scene.add(light);
 
-        const clock = new THREE.Clock();
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+            scene.add(ambientLight);
 
-        // 2. 載入穩定的官方測試 VRM 模型
-        statusEl.innerText = "正在遠端下載 3D 模型 (約需 5-10 秒)...";
-        const loader = new THREE.GLTFLoader();
-        
-        // 替換為更穩定的 Pixiv 官方模型網址
-        const vrmUrl = 'https://pixiv.github.io/three-vrm/packages/three-vrm/examples/models/three-vrm-girl.vrm';
-
-        loader.load(
-            vrmUrl,
-            (gltf) => {
-                // 呼叫 vrm 0.6.7 版本的載入方式
-                THREE.VRM.from(gltf).then((vrm) => {
-                    currentVrm = vrm;
-                    scene.add(vrm.scene);
-                    vrm.scene.rotation.y = Math.PI; // 面向鏡頭
-                    statusEl.innerText = "模型載入成功！正在向瀏覽器請求相機權限...";
-                    startCamera();
-                });
-            },
-            (progress) => {
-                if (progress.total) {
-                    const percent = Math.round((progress.loaded / progress.total) * 100);
-                    statusEl.innerText = `模型下載中: ${percent}%`;
-                }
-            },
-            (error) => {
-                statusEl.innerText = "模型載入失敗，可能因跨網域阻擋，請嘗試重新整理。";
-                console.error(error);
-            }
-        );
-
-        // 3. 動作捕捉連動
-        function onPoseResults(results) {
-            const canvas2d = document.getElementById('output_canvas');
-            const ctx2d = canvas2d.getContext('2d');
-            ctx2d.clearRect(0, 0, canvas2d.width, canvas2d.height);
-            ctx2d.drawImage(results.image, 0, 0, canvas2d.width, canvas2d.height);
-
-            if (results.poseLandmarks && currentVrm) {
-                const rightWrist = results.poseLandmarks[16];
-                const rightShoulder = results.poseLandmarks[12];
-
-                if (rightWrist && rightShoulder && rightWrist.visibility > 0.5) {
-                    const deltaY = rightShoulder.y - rightWrist.y; 
-                    
-                    // VRM 0.6.x 取得骨架節點的方法
-                    const rightUpperArm = currentVrm.humanoid.getBoneNode(THREE.VRMHumanoidBoneName.RightUpperArm);
-                    
-                    if (rightUpperArm) {
-                        let targetRotationZ = deltaY * 2.5;
-                        targetRotationZ = Math.max(-0.2, Math.min(1.5, targetRotationZ));
-                        rightUpperArm.rotation.z += (targetRotationZ - rightUpperArm.rotation.z) * 0.3;
-                    }
-                }
-            }
+            clock = new THREE.Clock();
+            animate();
         }
 
-        // 4. 啟動相機
-        function startCamera() {
-            const videoElement = document.getElementById('webcam');
-            
-            const pose = new Pose({
-                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+        // --- 2. 處理使用者本地上傳 VRM ---
+        const loader = new GLTFLoader();
+        // 註冊 VRM 插件以支援 0.x 與 1.0 版本的 VRM 模型
+        loader.register((parser) => new VRMLoaderPlugin(parser));
+
+        fileInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            statusElement.className = "status-text";
+            statusElement.innerText = "系統狀態：正在讀取並解析模型中...";
+
+            // 移除舊模型
+            if (currentVrm) {
+                scene.remove(currentVrm.scene);
+                currentVrm.scene.traverse((object) => {
+                    if (object.geometry) object.geometry.dispose();
+                    if (object.material) {
+                        if (Array.isArray(object.material)) {
+                            object.material.forEach((material) => material.dispose());
+                        } else {
+                            object.material.dispose();
+                        }
+                    }
+                });
+                currentVrm = null;
+            }
+
+            // 將上傳的 File 物件轉為 Blob URL (本地直接讀取，無 CORS 問題)
+            const blobUrl = URL.createObjectURL(file);
+
+            loader.load(
+                blobUrl,
+                (gltf) => {
+                    const vrm = gltf.userData.vrm;
+                    currentVrm = vrm;
+                    scene.add(vrm.scene);
+
+                    // 調整模型面向與轉正
+                    vrm.scene.rotation.y = Math.PI; 
+
+                    statusElement.className = "status-text success";
+                    statusElement.innerText = "系統狀態：模型載入成功！正在啟動視訊鏡頭偵測...";
+                    
+                    URL.revokeObjectURL(blobUrl);
+                    
+                    // 模型載入成功後，啟動視訊與手勢偵測
+                    initWebcamAndTracking();
+                },
+                (progress) => {
+                    if (progress.total > 0) {
+                        const percent = Math.round((progress.loaded / progress.total) * 100);
+                        statusElement.innerText = `系統狀態：正在載入模型 (${percent}%)`;
+                    }
+                },
+                (error) => {
+                    console.error(error);
+                    statusElement.className = "status-text error";
+                    statusElement.innerText = "系統狀態：模型解析失敗，請確認檔案是否為標準 VRM 格式。";
+                    URL.revokeObjectURL(blobUrl);
+                }
+            );
+        });
+
+        // --- 3. 初始化視訊與 MediaPipe 手勢偵測 ---
+        function initWebcamAndTracking() {
+            const hands = new Hands({
+                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
             });
 
-            pose.setOptions({
+            hands.setOptions({
+                maxNumHands: 1,
                 modelComplexity: 1,
-                smoothLandmarks: true,
                 minDetectionConfidence: 0.5,
                 minTrackingConfidence: 0.5
             });
-            pose.onResults(onPoseResults);
 
-            const camera = new Camera(videoElement, {
+            hands.onResults(onHandResults);
+
+            const cameraUtils = new Camera(videoElement, {
                 onFrame: async () => {
-                    await pose.send({ image: videoElement });
+                    await hands.send({ image: videoElement });
                 },
                 width: 640,
                 height: 480
             });
-            
-            camera.start()
-                .then(() => { 
-                    statusEl.style.color = "#28a745";
-                    statusEl.innerText = "系統運作中！請揮動右手。"; 
+
+            cameraUtils.start()
+                .then(() => {
+                    statusElement.className = "status-text success";
+                    statusElement.innerText = "系統狀態：動態驅動中。請面向攝影機展示右手上下擺動！";
                 })
-                .catch(err => { 
-                    statusEl.style.color = "#dc3545";
-                    statusEl.innerText = "相機開啟失敗。請檢查瀏覽器網址左側鎖頭，確認已允許相機權限。"; 
+                .catch((err) => {
+                    console.error(err);
+                    statusElement.className = "status-text error";
+                    statusElement.innerText = "系統狀態：無法存取視訊鏡頭，請確認權限是否開啟。";
                 });
         }
 
-        // 5. 渲染循環
+        // --- 4. 根據手勢偵測結果驅動 VRM 骨骼 ---
+        function onHandResults(results) {
+            if (!currentVrm || !results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+                return;
+            }
+
+            // 取得偵測到的手部是左手還是右手
+            // 注意：MediaPipe 的影像預設與真人相反，且我們做了鏡像
+            const handLabel = results.multiHandedness[0].label; 
+            
+            // 題目要求：向攝影機展示右手指引
+            if (handLabel === 'Left') { // 鏡像後在影像中 Left 通常對應真人的右手
+                const landmarks = results.multiHandLandmarks[0];
+                
+                // 取得手掌核心節點（WRIST 腕部）的 Y 軸位置 (MediaPipe Y 軸向下，頂部為0, 底部為1)
+                // 為了對應 3D 空間，將其反轉並對應到適當的旋轉角度
+                const wristY = landmarks[0].y; 
+                
+                // 將 0.2 ~ 0.8 的範圍向上下對應到關節的旋轉（弧度制）
+                const targetRotationZ = (wristY - 0.5) * 2.0; 
+
+                // 取得 VRM 的右肩或右手臂骨骼並進行驅動
+                const rightUpperArm = currentVrm.humanoid.getRawBoneNode('rightUpperArm');
+                if (rightUpperArm) {
+                    // 運用簡單的線性插值（Lerp）讓動作平滑
+                    rightUpperArm.rotation.z = THREE.MathUtils.lerp(rightUpperArm.rotation.z, targetRotationZ, 0.2);
+                }
+            }
+        }
+
+        // --- 5. 動畫渲染迴圈 ---
         function animate() {
             requestAnimationFrame(animate);
-            const deltaTime = clock.getDelta();
-            if (currentVrm) {
-                currentVrm.update(deltaTime);
-            }
-            renderer.render(scene, camera3d);
-        }
-        animate();
 
+            const delta = clock.getDelta();
+            if (currentVrm) {
+                // 更新 VRM 組件（處理眨眼、春（動態骨骼）等物理模擬）
+                currentVrm.update(delta);
+            }
+
+            if (renderer && scene && camera) {
+                renderer.render(scene, camera);
+            }
+        }
+
+        // 視窗縮放處理
         window.addEventListener('resize', () => {
-            camera3d.aspect = window.innerWidth / window.innerHeight;
-            camera3d.updateProjectionMatrix();
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         });
+
+        // 頁面載入後先初始化 3D
+        window.addEventListener('DOMContentLoaded', init3D);
     </script>
 </body>
 </html>
